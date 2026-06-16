@@ -1,0 +1,6 @@
+{
+  "name": "PT Routine Tracker",
+  "description": "날짜별 PT 운동 루틴을 체계적으로 분류, 기록하고 분석하는 퍼스널 트레이닝 관리 애플리케이션",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

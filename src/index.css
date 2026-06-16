@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+/**
+ * 라이트 테마 — 흰색/옅은 하늘색 배경 + 하늘색(sky) 액센트
+ * slate-* 를 밝은 계열로, lime-* 를 sky blue로 교체.
+ * 컴포넌트 코드 수정 없이 전체 테마가 바뀜.
+ */
+@theme {
+  /* ── 배경 / 서피스 (밝은 계열) ── */
+  --color-slate-950: #f0f9ff;   /* 앱 메인 배경 — sky-50 (거의 흰색에 하늘색 틴트) */
+  --color-slate-900: #ffffff;   /* 카드 배경 — 순백 */
+  --color-slate-800: #e0f2fe;   /* 인풋·서브 서피스 — sky-100 */
+  --color-slate-700: #bae6fd;   /* 호버·보더 — sky-200 */
+
+  /* ── 텍스트 (어두운 계열, 명암비 확보) ── */
+  --color-slate-600: #7eb5cc;   /* 아이콘·흐린 요소 */
+  --color-slate-500: #4a7fa0;   /* 보조 텍스트 */
+  --color-slate-400: #2d5f80;   /* 일반 텍스트 */
+  --color-slate-300: #1a4060;   /* 강조 텍스트 */
+  --color-slate-200: #102a45;   /* 제목급 */
+  --color-slate-100: #071825;   /* 기본 텍스트 (거의 검정) */
+  --color-slate-50:  #020a10;
+
+  /* ── 하늘색 액센트 (기존 lime-* → sky blue 교체) ── */
+  --color-lime-500: #0ea5e9;   /* sky-500 — 버튼·활성 탭 */
+  --color-lime-400: #38bdf8;   /* sky-400 — 아이콘·강조 */
+  --color-lime-300: #7dd3fc;   /* sky-300 — 부드러운 강조 */
+  --color-lime-200: #bae6fd;   /* sky-200 */
+  --color-lime-100: #e0f2fe;   /* sky-100 */
+}
