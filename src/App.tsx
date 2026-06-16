@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { PTSession } from './types';
 import { getInitialSessions } from './data/initialData';
+import { supabase } from './lib/supabase';
 import CalendarView from './components/CalendarView';
 import SessionDetail from './components/SessionDetail';
 import StatsDashboard from './components/StatsDashboard';
@@ -10,62 +11,96 @@ import ExerciseDirectory from './components/ExerciseDirectory';
 import GalleryView from './components/GalleryView';
 import {
   Dumbbell, Calendar as CalIcon, TrendingUp, Sparkles, Plus,
-  RotateCcw, ShieldCheck, BookOpen, ImageIcon
+  RotateCcw, ShieldCheck, BookOpen, ImageIcon, Loader2
 } from 'lucide-react';
 
 type ActiveTab = 'journal' | 'directory' | 'gallery' | 'stats' | 'coach';
+
+/* DB row(snake_case) ↔ PTSession(camelCase) 변환 */
+function toRow(s: PTSession) {
+  return {
+    id: s.id,
+    date: s.date,
+    title: s.title,
+    focus: s.focus,
+    exercises: s.exercises,
+    duration: s.duration ?? 0,
+    trainer_feedback: s.trainerFeedback ?? '',
+    user_notes: s.userNotes ?? '',
+    score: s.score ?? 3,
+    homework: s.homework ?? '',
+    homework_completed: s.homeworkCompleted ?? false,
+    completed: s.completed ?? true,
+  };
+}
+
+function fromRow(row: any): PTSession {
+  return {
+    id: row.id,
+    date: row.date,
+    title: row.title,
+    focus: row.focus ?? [],
+    exercises: row.exercises ?? [],
+    duration: row.duration ?? 0,
+    trainerFeedback: row.trainer_feedback ?? '',
+    userNotes: row.user_notes ?? '',
+    score: row.score ?? 3,
+    homework: row.homework ?? '',
+    homeworkCompleted: row.homework_completed ?? false,
+    completed: row.completed ?? true,
+  };
+}
 
 export default function App() {
   const [sessions, setSessions] = useState<PTSession[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>("2026-06-19");
   const [activeTab, setActiveTab] = useState<ActiveTab>('journal');
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
+  /* 초기 데이터 로드 */
   useEffect(() => {
-    const cached = localStorage.getItem('pt_sessions_data');
-    const fresh = getInitialSessions();
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached);
-        if (parsed.length < fresh.length || !parsed.some((s: any) => s.homework !== undefined)) {
-          setSessions(fresh);
-          localStorage.setItem('pt_sessions_data', JSON.stringify(fresh));
-        } else {
-          setSessions(parsed);
-        }
-      } catch {
+    (async () => {
+      const { data, error } = await supabase
+        .from('pt_sessions')
+        .select('*')
+        .order('date', { ascending: true });
+
+      if (!error && data && data.length > 0) {
+        setSessions(data.map(fromRow));
+      } else {
+        /* DB가 비어 있으면 초기 데이터 삽입 */
+        const fresh = getInitialSessions();
+        await supabase.from('pt_sessions').insert(fresh.map(toRow));
         setSessions(fresh);
       }
-    } else {
-      setSessions(fresh);
-    }
+      setIsLoading(false);
+    })();
   }, []);
 
-  const saveSessions = (updated: PTSession[]) => {
-    setSessions(updated);
-    localStorage.setItem('pt_sessions_data', JSON.stringify(updated));
+  const handleUpdateSession = async (updated: PTSession) => {
+    setSessions(prev => prev.map(s => s.id === updated.id ? updated : s));
+    await supabase.from('pt_sessions').upsert(toRow(updated));
   };
 
-  const handleUpdateSession = (updatedSession: PTSession) => {
-    saveSessions(sessions.map(s => s.id === updatedSession.id ? updatedSession : s));
-  };
-
-  const handleDeleteSession = (sessionId: string) => {
+  const handleDeleteSession = async (sessionId: string) => {
     if (window.confirm("정말로 이 PT 트레이닝 일지를 영구 삭제하시겠습니까?")) {
-      saveSessions(sessions.filter(s => s.id !== sessionId));
+      setSessions(prev => prev.filter(s => s.id !== sessionId));
+      await supabase.from('pt_sessions').delete().eq('id', sessionId);
     }
   };
 
-  const handleCreateSession = (newSession: PTSession) => {
+  const handleCreateSession = async (newSession: PTSession) => {
     const existing = sessions.find(s => s.date === newSession.date);
     if (existing) {
       alert(`이미 ${newSession.date} 날짜에 PT 세션이 배정되어 있습니다!`);
       setSelectedDate(newSession.date);
       return;
     }
-    saveSessions([...sessions, newSession].sort((a, b) => a.date.localeCompare(b.date)));
+    setSessions(prev => [...prev, newSession].sort((a, b) => a.date.localeCompare(b.date)));
     setSelectedDate(newSession.date);
     setIsAddOpen(false);
+    await supabase.from('pt_sessions').insert(toRow(newSession));
   };
 
   const handleAddSessionInlineForDate = (date: string) => {
@@ -73,10 +108,13 @@ export default function App() {
     setIsAddOpen(true);
   };
 
-  const handleResetData = () => {
+  const handleResetData = async () => {
     if (window.confirm("모든 트레이닝 변경 이력을 초기화하고 오리지널 PT 기록 데이터로 재설정하시겠습니까?")) {
-      saveSessions(getInitialSessions());
+      const fresh = getInitialSessions();
+      setSessions(fresh);
       setSelectedDate("2026-06-19");
+      await supabase.from('pt_sessions').delete().neq('id', '');
+      await supabase.from('pt_sessions').insert(fresh.map(toRow));
       alert("성공적으로 오리지널 PT 트레이닝이 복원되었습니다!");
     }
   };
@@ -96,13 +134,12 @@ export default function App() {
 
       {/* ─── Header ─── */}
       <header className="border-b border-slate-800/80 bg-slate-900/70 backdrop-blur-md sticky top-0 z-40 px-4 md:px-8 py-3 flex items-center justify-between gap-3">
-        {/* Logo */}
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-lime-500 to-emerald-500 flex items-center justify-center shadow-md shadow-lime-500/20 flex-shrink-0">
             <Dumbbell className="w-4 h-4 text-slate-900 stroke-[2.5]" />
           </div>
           <div>
-            <h1 className="text-sm font-black tracking-tight text-slate-100 uppercase font-mono leading-none flex items-center gap-1.5">
+            <h1 className="text-sm font-black tracking-tight text-slate-100 uppercase font-mono leading-none">
               PT Tracker
             </h1>
             <p className="text-[10px] text-slate-500 leading-none mt-0.5 hidden sm:block">체계적 PT 기록 & 분석</p>
@@ -127,7 +164,6 @@ export default function App() {
           ))}
         </div>
 
-        {/* Add button */}
         <button
           onClick={() => setIsAddOpen(true)}
           className="px-3 py-2 bg-lime-500 hover:bg-lime-400 active:scale-95 text-slate-950 font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-[0_4px_14px_rgba(132,204,22,0.2)] transition-all duration-200 flex-shrink-0"
@@ -140,72 +176,67 @@ export default function App() {
       {/* ─── Main ─── */}
       <main className="flex-1 max-w-6xl w-full mx-auto p-4 md:p-6 lg:p-8">
 
-        {/* 저널 탭 */}
-        {activeTab === 'journal' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-
-            {/* 좌측: 캘린더 + 타임라인 */}
-            <div className="lg:col-span-5 space-y-5">
-              <CalendarView
-                sessions={sessions}
-                selectedDate={selectedDate}
-                onSelectDate={setSelectedDate}
-              />
-              {/* 타임라인 - 데스크탑 전용 */}
-              <div className="hidden lg:block">
-                <TimelinePanel
-                  sessions={sessions}
-                  selectedDate={selectedDate}
-                  onSelectDate={setSelectedDate}
-                />
-              </div>
-            </div>
-
-            {/* 우측: 세션 상세 */}
-            <div className="lg:col-span-7">
-              <SessionDetail
-                session={activeSession}
-                onUpdateSession={handleUpdateSession}
-                onDeleteSession={handleDeleteSession}
-                onAddSessionForDate={handleAddSessionInlineForDate}
-                selectedDate={selectedDate}
-              />
-            </div>
-
+        {/* 로딩 */}
+        {isLoading && (
+          <div className="flex items-center justify-center h-64 gap-3 text-slate-500">
+            <Loader2 className="w-5 h-5 animate-spin text-lime-400" />
+            <span className="text-sm font-mono">데이터 불러오는 중...</span>
           </div>
         )}
 
-        {/* 운동도감 탭 */}
-        {activeTab === 'directory' && (
-          <ExerciseDirectory
-            sessions={sessions}
-            onSelectDate={setSelectedDate}
-            onSwitchTab={setActiveTab}
-          />
-        )}
+        {!isLoading && (
+          <>
+            {activeTab === 'journal' && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                <div className="lg:col-span-5 space-y-5">
+                  <CalendarView
+                    sessions={sessions}
+                    selectedDate={selectedDate}
+                    onSelectDate={setSelectedDate}
+                  />
+                  <div className="hidden lg:block">
+                    <TimelinePanel
+                      sessions={sessions}
+                      selectedDate={selectedDate}
+                      onSelectDate={setSelectedDate}
+                    />
+                  </div>
+                </div>
+                <div className="lg:col-span-7">
+                  <SessionDetail
+                    session={activeSession}
+                    onUpdateSession={handleUpdateSession}
+                    onDeleteSession={handleDeleteSession}
+                    onAddSessionForDate={handleAddSessionInlineForDate}
+                    selectedDate={selectedDate}
+                  />
+                </div>
+              </div>
+            )}
 
-        {/* 갤러리 탭 */}
-        {activeTab === 'gallery' && (
-          <GalleryView />
-        )}
+            {activeTab === 'directory' && (
+              <ExerciseDirectory
+                sessions={sessions}
+                onSelectDate={setSelectedDate}
+                onSwitchTab={setActiveTab}
+              />
+            )}
 
-        {/* 통계 탭 */}
-        {activeTab === 'stats' && (
-          <StatsDashboard sessions={sessions} />
-        )}
+            {activeTab === 'gallery' && <GalleryView />}
 
-        {/* AI코치 탭 */}
-        {activeTab === 'coach' && (
-          <CoachInsight sessions={sessions} />
+            {activeTab === 'stats' && <StatsDashboard sessions={sessions} />}
+
+            {activeTab === 'coach' && <CoachInsight sessions={sessions} />}
+          </>
         )}
 
       </main>
 
-      {/* ─── Footer (데스크탑) ─── */}
+      {/* ─── Footer ─── */}
       <footer className="hidden md:flex border-t border-slate-800/60 bg-slate-900/30 py-4 px-8 text-[11px] text-slate-600 font-mono items-center justify-between gap-4">
         <div className="flex items-center gap-2">
           <ShieldCheck className="w-3.5 h-3.5 text-lime-500/60" />
-          <span>PT Routine Tracker — Local Storage</span>
+          <span>PT Routine Tracker — Supabase</span>
         </div>
         <div className="flex items-center gap-4">
           <button
@@ -219,7 +250,7 @@ export default function App() {
         </div>
       </footer>
 
-      {/* ─── 모바일 하단 내비게이션 ─── */}
+      {/* ─── 모바일 내비게이션 ─── */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur-xl border-t border-slate-800/80 z-50">
         <div className="flex items-center justify-around px-1 pb-safe">
           {tabItems.map(({ key, label, icon }) => (
@@ -239,7 +270,6 @@ export default function App() {
         </div>
       </nav>
 
-      {/* ─── 다이얼로그 ─── */}
       <AddSessionDialogue
         isOpen={isAddOpen}
         onClose={() => setIsAddOpen(false)}
@@ -250,11 +280,9 @@ export default function App() {
   );
 }
 
-/* ─── 타임라인 패널 (데스크탑 전용) ─── */
+/* ─── 타임라인 패널 ─── */
 function TimelinePanel({
-  sessions,
-  selectedDate,
-  onSelectDate,
+  sessions, selectedDate, onSelectDate,
 }: {
   sessions: PTSession[];
   selectedDate: string;
